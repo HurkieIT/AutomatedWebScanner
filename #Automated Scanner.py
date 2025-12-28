@@ -1,6 +1,7 @@
 #Automated Scanner (Nmap, Nikto, GoBuster, Nuclei)
 #Gemaakt door: Jens Cornelius Gijsbertus van den Hurk
-#Datum 17-12-2025 - 19-12-2025
+#Datum 17-12-2025 - 19-12-2025 (v0.1)
+#Edit 27-12-2025 - 28-12-2025 (v1.0)
 
 # __________________________________________
 
@@ -27,7 +28,7 @@ def NmapReconnaissanceResults(discovery_xml, os_xml, services_xml):
 def NmapScanFase():
 
     # Vul je Target IP Network in
-    TargetIP = input('Voer het Target IP Network in (bijv. 192.168.10.0/24): ')
+    TargetIP = input('Voer het Target IP OF Network in (bijv. 192.168.XXX.XXX | 192.168.XXX.0/24): ')
 
     output_discovery = "TARGET_discovery.xml"
     output_os_dir = "os_scans"        # optioneel: per-host OS-scan
@@ -165,7 +166,7 @@ def NiktoWebScan(CompleteScan):
             if protocol == "https":
                 command.insert(2, "-ssl")
 
-            subprocess.run(command, check=True)
+            subprocess.run(command, check=False)
 
             ScanResults.append({
                 "host": ip_address,
@@ -229,7 +230,7 @@ def GoBusterPathScan(CompleteScan):
             if protocol == "https":
                 command.append("-k")
 
-            subprocess.run(command, check=True)
+            subprocess.run(command, check=False)
 
             ScanResults.append({
                 "host": ip_address,
@@ -263,25 +264,33 @@ def NucleiVulnerabilityScan(CompleteScan):
         ip_address = addr_el.get("addr")
 
         for port in host.findall(".//port"):
+            if not IsPortOpen(port):
+                continue
+        
             service = port.find("service")
             if service is None:
                 continue
-
+        
             service_name = service.get("name")
-
-            target = f"{ip_address}:{port.get('portid')}"
-            output_file = f"Nuclei_{ip_address}_{port.get('portid')}.json"
-
+            portid = port.get("portid")
+        
+            is_web, protocol = DetectWebService(service_name, portid)
+            if not is_web:
+                continue
+        
+            target = f"{protocol}://{ip_address}:{portid}"
+            output_file = f"Nuclei_{ip_address}_{portid}.json"
+        
             print(f"[+] Start Nuclei scan op {target}")
-
+        
             subprocess.run(
                 ["nuclei", "-u", target, "-jsonl", "-o", output_file],
-                check=True
+                check=False
             )
-
+        
             ScanResults.append({
                 "host": ip_address,
-                "port": port.get("portid"),
+                "port": portid,
                 "service": service_name,
                 "output": output_file
             })
@@ -353,18 +362,16 @@ def ParseGoBusterOutput(output_file):
                 if not line.startswith("/"):
                     continue
 
-                # Voorbeelden:
+                # Verwachte formats:
                 # /admin (Status: 403) [Size: 287]
                 # /login (Status: 200)
-
-                parts = line.split()
-                path = parts[0]
+                path = line.split()[0]
 
                 status = "unknown"
-                for part in parts:
-                    if "Status:" in part:
-                        status = part.replace("Status:", "").replace(")", "")
-                        break
+                marker = "Status:"
+                if marker in line:
+                    after = line.split(marker, 1)[1].strip()   # bv "403) [Size: 287]"
+                    status = "".join(ch for ch in after if ch.isdigit()) or "unknown"
 
                 entries.append(f"{path} ({status})")
 
@@ -399,7 +406,8 @@ def BuildFinalReconReport(ReconResultsRaw):
 
         for port in host.findall(".//port"):
             portid = port.get("portid")
-            service_name = port.find("service").get("name")
+            service_el = port.find("service") 
+            service_name = service_el.get("name") if service_el is not None else "unknown"
 
             ReconnaissanceReport["hosts"][ip]["services"][portid] = {
                 "service": service_name,
@@ -489,13 +497,15 @@ def BuildFinalReconReport(ReconResultsRaw):
         total_vulns = 0
         highest_severity = "none"
 
-        severity_order = ["none", "low", "medium", "high", "critical"]
+        severity_order = ["none", "info", "low", "medium", "high", "critical"]
 
         for service in host_data["services"].values():
             for vuln in service["vulnerabilities"]:
                 total_vulns += 1
-                sev = vuln.get("severity", "none").lower()
-                if severity_order.index(sev) > severity_order.index(highest_severity):
+                sev = (vuln.get("severity") or "none").lower()
+                if sev not in severity_order:
+                    sev = "info"
+                if severity_order.index(sev) > severity_order.index(highest_severity):     
                     highest_severity = sev
 
         host_data["summary"] = {
@@ -512,5 +522,22 @@ def BuildFinalReconReport(ReconResultsRaw):
             host_data["risk_level"] = "Low"
 
     return ReconnaissanceReport
+
+print("[*] Automated Scanner gestart")
+
+nmap_results = NmapScanFase()
+nikto_results = NiktoWebScan(nmap_results)
+gobuster_results = GoBusterPathScan(nmap_results)
+nuclei_results = NucleiVulnerabilityScan(nmap_results)
+
+final_report = BuildFinalReconReport({
+    "Nmap": nmap_results,
+    "Nikto": nikto_results,
+    "GoBuster": gobuster_results,
+    "Nuclei": nuclei_results
+})
+
+print("\n Scan afgerond")
+print(json.dumps(final_report, indent=4))
 
 # ______________Done for Now.___________________
