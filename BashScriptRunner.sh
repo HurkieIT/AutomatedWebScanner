@@ -1,5 +1,4 @@
 #!/usr/bin/env bash
-set -euo pipefail
 
 #___________________________________________________
 
@@ -35,6 +34,7 @@ read -p "Press Enter to continue to the scanner..."
 
 # 3. If all dependencies are met, run the Automated Scanner
 python3 AutomatedScanner.py
+
 
 
 
