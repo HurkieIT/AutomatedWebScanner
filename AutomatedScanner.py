@@ -540,4 +540,12 @@ final_report = BuildFinalReconReport({
 print("\n Scan afgerond")
 print(json.dumps(final_report, indent=4))
 
+output_file = "Rapport.json"
+
+with open(output_file, "w", encoding="utf-8") as f:
+    json.dump(final_report, f, indent=4)
+
+print(f"[+] Eindrapport opgeslagen als {output_file}")
+
 # ______________Done for Now.___________________
+
